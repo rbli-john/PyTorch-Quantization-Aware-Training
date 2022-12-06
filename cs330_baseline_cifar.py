@@ -10,6 +10,9 @@ from torchvision import datasets, transforms
 import time
 import copy
 import numpy as np
+import logging
+# logging.basicConfig(format='%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
 
 from resnet import resnet18
 from vovnet import VovNet
@@ -133,7 +136,7 @@ def train_model(model,
                                               test_loader=test_loader,
                                               device=device,
                                               criterion=criterion)
-    print("Epoch: {:03d} Eval Loss: {:.3f} Eval Acc: {:.3f}".format(
+    logging.info("Epoch: {:03d} Eval Loss: {:.3f} Eval Acc: {:.3f}".format(
         0, eval_loss, eval_accuracy))
 
     for epoch in range(num_epochs):
@@ -180,7 +183,7 @@ def train_model(model,
         # Set learning rate scheduler
         scheduler.step()
 
-        print(
+        logging.info(
             "Epoch: {:03d} Train Loss: {:.3f} Train Acc: {:.3f} Eval Loss: {:.3f} Eval Acc: {:.3f}"
             .format(epoch + 1, train_loss, train_accuracy, eval_loss,
                     eval_accuracy))
@@ -327,15 +330,20 @@ def model_equivalence(model_1,
 
 
 def main():
+    finetune = True
+    finetune_layer_keyword = 'fc'
+    # Maybe need to adjust learning_rate for finetuning?
+    learning_rate = 1e-2
+    num_epochs=100
+    arch = 'vovnet'
+    assert arch in ('resnet', 'vovnet')
+    print(f'Setting: arch={arch}, lr={learning_rate}, finetune={finetune}, finetune_layer_keyword={finetune_layer_keyword}, num_epochs={num_epochs}')
+
 
     random_seed = 0
     num_classes = 10
     cuda_device = torch.device("cuda:0")
     cpu_device = torch.device("cpu:0")
-
-    arch = 'vovnet'
-    assert arch in ('resnet', 'vovnet')
-    print(f'Using {arch} architecture.')
 
     model_dir = "saved_models"
     if arch == 'resnet':
@@ -343,10 +351,26 @@ def main():
     else:
         model_filename = "vovnet_slim19.pt"
 
+    if finetune:
+        baseline_model_path = os.path.join(model_dir, model_filename)
+        dot_pos = model_filename.rfind('.')
+        assert dot_pos != -1
+        model_filename = f'{model_filename[:dot_pos]}_ft_{finetune_layer_keyword}.{model_filename[dot_pos+1:]}'
+        print(f'Finetune dst model_file: {model_filename}')
+
     set_random_seeds(random_seed=random_seed)
 
     # Create an untrained model.
     model = create_model(num_classes=num_classes, arch=arch)
+
+    if finetune:
+        print(f'Loading pre-trained weights from {baseline_model_path}')
+        model.load_state_dict(torch.load(baseline_model_path))
+        for name, param in model.named_parameters():
+            if not name.startswith(finetune_layer_keyword):
+                param.requires_grad = False
+            else:
+                print(f'Finetune param: {name}')
 
     train_loader, test_loader = prepare_dataloader(num_workers=8,
                                                    train_batch_size=128,
@@ -359,8 +383,8 @@ def main():
                         test_loader=test_loader,
                         device=cuda_device,
                         # device=cpu_device,
-                        learning_rate=1e-1,
-                        num_epochs=200)
+                        learning_rate=learning_rate,
+                        num_epochs=num_epochs)
     # Save model.
     save_model(model=model, model_dir=model_dir, model_filename=model_filename)
 
