@@ -357,8 +357,8 @@ def main():
     model = train_model(model=model,
                         train_loader=train_loader,
                         test_loader=test_loader,
-                        # device=cuda_device,
-                        device=cpu_device,
+                        device=cuda_device,
+                        # device=cpu_device,
                         learning_rate=1e-1,
                         num_epochs=200)
     # Save model.
