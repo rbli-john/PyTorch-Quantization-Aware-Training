@@ -12,6 +12,7 @@ import copy
 import numpy as np
 
 from resnet import resnet18
+from vovnet import VovNet
 
 
 def set_random_seeds(random_seed=0):
@@ -148,6 +149,10 @@ def train_model(model,
             inputs = inputs.to(device)
             labels = labels.to(device)
 
+            # print(f'input.shape: {inputs.size()}')
+            # print(f'labels.shape: {labels.size()}')
+
+
             # zero the parameter gradients
             optimizer.zero_grad()
 
@@ -252,20 +257,22 @@ def load_torchscript_model(model_filepath, device):
     return model
 
 
-def create_model(num_classes=10):
+def create_model(num_classes=10, arch: str='resnet'):
+    if arch == 'resnet':
+        # The number of channels in ResNet18 is divisible by 8.
+        # This is required for fast GEMM integer matrix multiplication.
+        # model = torchvision.models.resnet18(pretrained=False)
+        model = resnet18(num_classes=num_classes, pretrained=False)
 
-    # The number of channels in ResNet18 is divisible by 8.
-    # This is required for fast GEMM integer matrix multiplication.
-    # model = torchvision.models.resnet18(pretrained=False)
-    model = resnet18(num_classes=num_classes, pretrained=False)
+        # We would use the pretrained ResNet18 as a feature extractor.
+        # for param in model.parameters():
+        #     param.requires_grad = False
 
-    # We would use the pretrained ResNet18 as a feature extractor.
-    # for param in model.parameters():
-    #     param.requires_grad = False
-
-    # Modify the last FC layer
-    # num_features = model.fc.in_features
-    # model.fc = nn.Linear(num_features, 10)
+        # Modify the last FC layer
+        # num_features = model.fc.in_features
+        # model.fc = nn.Linear(num_features, 10)
+    else:
+        model = VovNet(num_classes, input_ch=3, vovnet_conv_body='V-19-slim-eSE', norm='BN')
 
     return model
 
@@ -326,17 +333,20 @@ def main():
     cuda_device = torch.device("cuda:0")
     cpu_device = torch.device("cpu:0")
 
+    arch = 'vovnet'
+    assert arch in ('resnet', 'vovnet')
+    print(f'Using {arch} architecture.')
+
     model_dir = "saved_models"
-    model_filename = "resnet18_cifar10.pt"
-    quantized_model_filename = "resnet18_quantized_cifar10.pt"
-    model_filepath = os.path.join(model_dir, model_filename)
-    quantized_model_filepath = os.path.join(model_dir,
-                                            quantized_model_filename)
+    if arch == 'resnet':
+        model_filename = "resnet18_cifar10.pt"
+    else:
+        model_filename = "vovnet_slim19.pt"
 
     set_random_seeds(random_seed=random_seed)
 
     # Create an untrained model.
-    model = create_model(num_classes=num_classes)
+    model = create_model(num_classes=num_classes, arch=arch)
 
     train_loader, test_loader = prepare_dataloader(num_workers=8,
                                                    train_batch_size=128,
@@ -347,7 +357,8 @@ def main():
     model = train_model(model=model,
                         train_loader=train_loader,
                         test_loader=test_loader,
-                        device=cuda_device,
+                        # device=cuda_device,
+                        device=cpu_device,
                         learning_rate=1e-1,
                         num_epochs=200)
     # Save model.
@@ -355,5 +366,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
