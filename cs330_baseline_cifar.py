@@ -17,6 +17,9 @@ logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=loggin
 from resnet import resnet18
 from vovnet import VovNet
 
+CIFAR10 = 'cifar10'
+FASHION_MNIST = 'fashion_nist'
+
 
 def set_random_seeds(random_seed=0):
 
@@ -29,34 +32,60 @@ def set_random_seeds(random_seed=0):
 
 def prepare_dataloader(num_workers=8,
                        train_batch_size=128,
-                       eval_batch_size=256):
+                       eval_batch_size=256,
+                       dataset: str=None):
+    if dataset == CIFAR10:
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406),
+                                 std=(0.229, 0.224, 0.225))
+        ])
 
-    train_transform = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        transforms.Normalize(mean=(0.485, 0.456, 0.406),
-                             std=(0.229, 0.224, 0.225))
-    ])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406),
+                                 std=(0.229, 0.224, 0.225))
+        ])
 
-    test_transform = transforms.Compose([
-        transforms.ToTensor(),
-        # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        transforms.Normalize(mean=(0.485, 0.456, 0.406),
-                             std=(0.229, 0.224, 0.225))
-    ])
+        train_set = torchvision.datasets.CIFAR10(root="data",
+                                                 train=True,
+                                                 download=True,
+                                                 transform=train_transform)
+        # We will use test set for validation and test in this project.
+        # Do not use test set for validation in practice!
+        test_set = torchvision.datasets.CIFAR10(root="data",
+                                                train=False,
+                                                download=True,
+                                                transform=test_transform)
+    elif dataset == FASHION_MNIST:
+        train_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
 
-    train_set = torchvision.datasets.CIFAR10(root="data",
-                                             train=True,
-                                             download=True,
-                                             transform=train_transform)
-    # We will use test set for validation and test in this project.
-    # Do not use test set for validation in practice!
-    test_set = torchvision.datasets.CIFAR10(root="data",
-                                            train=False,
-                                            download=True,
-                                            transform=test_transform)
+        test_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+        train_set = torchvision.datasets.FashionMNIST(root="data",
+                                                      train=True,
+                                                      download=True,
+                                                      transform=train_transform)
+        # We will use test set for validation and test in this project.
+        # Do not use test set for validation in practice!
+        test_set = torchvision.datasets.FashionMNIST(root="data",
+                                                     train=False,
+                                                     download=True,
+                                                     transform=test_transform)
+    else:
+        raise NotImplemented()
 
     train_sampler = torch.utils.data.RandomSampler(train_set)
     test_sampler = torch.utils.data.SequentialSampler(test_set)
@@ -260,8 +289,10 @@ def load_torchscript_model(model_filepath, device):
     return model
 
 
-def create_model(num_classes=10, arch: str='resnet'):
+def create_model(num_classes=10, arch: str='resnet', input_ch=3):
     if arch == 'resnet':
+        assert input_ch == 3
+
         # The number of channels in ResNet18 is divisible by 8.
         # This is required for fast GEMM integer matrix multiplication.
         # model = torchvision.models.resnet18(pretrained=False)
@@ -275,7 +306,7 @@ def create_model(num_classes=10, arch: str='resnet'):
         # num_features = model.fc.in_features
         # model.fc = nn.Linear(num_features, 10)
     else:
-        model = VovNet(num_classes, input_ch=3, vovnet_conv_body='V-19-slim-eSE', norm='BN')
+        model = VovNet(num_classes, input_ch=input_ch, vovnet_conv_body='V-19-slim-eSE', norm='BN')
 
     return model
 
@@ -330,15 +361,20 @@ def model_equivalence(model_1,
 
 
 def main():
-    finetune = True
+    finetune = False
+    # finetune = True
     finetune_layer_keyword = 'fc'
     # Maybe need to adjust learning_rate for finetuning?
-    learning_rate = 1e-2
-    num_epochs=100
+    learning_rate = 1e-1  # Learning rate for pre-training
+    # learning_rate = 1e-2
+    num_epochs = 100
     arch = 'vovnet'
     assert arch in ('resnet', 'vovnet')
-    print(f'Setting: arch={arch}, lr={learning_rate}, finetune={finetune}, finetune_layer_keyword={finetune_layer_keyword}, num_epochs={num_epochs}')
 
+    dataset_name = FASHION_MNIST
+    assert dataset_name in (FASHION_MNIST, CIFAR10)
+
+    print(f'Setting: arch={arch}, lr={learning_rate}, finetune={finetune}, finetune_layer_keyword={finetune_layer_keyword}, num_epochs={num_epochs}, dataset={dataset_name}')
 
     random_seed = 0
     num_classes = 10
@@ -347,9 +383,9 @@ def main():
 
     model_dir = "saved_models"
     if arch == 'resnet':
-        model_filename = "resnet18_cifar10.pt"
+        model_filename = f"resnet18_{dataset_name}.pt"
     else:
-        model_filename = "vovnet_slim19.pt"
+        model_filename = f"vovnet_slim19_{dataset_name}.pt"
 
     if finetune:
         baseline_model_path = os.path.join(model_dir, model_filename)
@@ -361,7 +397,8 @@ def main():
     set_random_seeds(random_seed=random_seed)
 
     # Create an untrained model.
-    model = create_model(num_classes=num_classes, arch=arch)
+    input_ch = 1 if dataset_name == FASHION_MNIST else 3
+    model = create_model(num_classes=num_classes, arch=arch, input_ch=input_ch)
 
     if finetune:
         print(f'Loading pre-trained weights from {baseline_model_path}')
@@ -374,15 +411,16 @@ def main():
 
     train_loader, test_loader = prepare_dataloader(num_workers=8,
                                                    train_batch_size=128,
-                                                   eval_batch_size=256)
+                                                   eval_batch_size=256,
+                                                   dataset=dataset_name)
 
     # Train model.
     print("Training Model...")
     model = train_model(model=model,
                         train_loader=train_loader,
                         test_loader=test_loader,
-                        device=cuda_device,
-                        # device=cpu_device,
+                        # device=cuda_device,
+                        device=cpu_device,
                         learning_rate=learning_rate,
                         num_epochs=num_epochs)
     # Save model.
