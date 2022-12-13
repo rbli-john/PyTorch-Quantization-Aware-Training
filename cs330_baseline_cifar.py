@@ -361,12 +361,13 @@ def model_equivalence(model_1,
 
 
 def main():
-    finetune = False
-    # finetune = True
+    # finetune = False
+    finetune = True
+    # finetune_layer_keyword = 'backbone.stem'
     finetune_layer_keyword = 'fc'
     # Maybe need to adjust learning_rate for finetuning?
-    learning_rate = 1e-1  # Learning rate for pre-training
-    # learning_rate = 1e-2
+    # learning_rate = 1e-1  # Learning rate for pre-training
+    learning_rate = 1e-2
     num_epochs = 100
     arch = 'vovnet'
     assert arch in ('resnet', 'vovnet')
@@ -400,6 +401,10 @@ def main():
     input_ch = 1 if dataset_name == FASHION_MNIST else 3
     model = create_model(num_classes=num_classes, arch=arch, input_ch=input_ch)
 
+    # for name, param in model.named_parameters():
+    #     print(f'param name: {name}')
+    # exit()
+
     if finetune:
         print(f'Loading pre-trained weights from {baseline_model_path}')
         model.load_state_dict(torch.load(baseline_model_path))
@@ -419,8 +424,8 @@ def main():
     model = train_model(model=model,
                         train_loader=train_loader,
                         test_loader=test_loader,
-                        # device=cuda_device,
-                        device=cpu_device,
+                        device=cuda_device,
+                        # device=cpu_device,
                         learning_rate=learning_rate,
                         num_epochs=num_epochs)
     # Save model.
